@@ -1,26 +1,71 @@
 #!/bin/bash
-# Script para Proxmox: Cria LXC Ubuntu + Cloudflare Tunnel para VMs
-CTID=999  # ID do novo CT (ajuste se ocupado)
-IP_CT="192.168.100.100/24"  # IP estático do CT (ajuste à sua rede)
-GATEWAY="192.168.100.1"     # Gateway da rede
+clear
+echo "🚀 RDP-SERVER: Cloudflare Tunnel Proxmox (Automático)"
+echo "================================================================"
+
+# Verifica Proxmox
+command -v pct >/dev/null 2>&1 || { echo "❌ Execute no HOST Proxmox!"; exit 1; }
+
+# Detecta rede automaticamente
+IP_CT=$(ip -4 route get 1 | awk '{print $7}' | head -1)
+IP_BASE=${IP_CT%.*}
+GATEWAY=$(ip route | grep default | awk '{print $3}')
 DNS="1.1.1.1"
-TOKEN_CF="SEU_TOKEN_AQUI"  # Cole o token do Zero Trust Tunnel aqui
-SUB_UBUNTU="ubuntu"        # ubuntu.grythprogress.com.br
-IP_VM_UBUNTU="192.168.100.10" # IP da VM Ubuntu
-SUB_WINDOWS="windows"      # windows.grythprogress.com.br
-IP_VM_WINDOWS="192.168.100.20" # IP da VM Windows
+CTID=999
 
-echo "Criando LXC Ubuntu $CTID..."
+# Perguntas mínimas (igual TVBOX)
+read -p "☁️  Nome do Túnel Cloudflare: " TUNNEL_NAME
+read -p "🌐 Seu domínio (ex: grythprogress.com.br): " DOMINIO
+read -p "📋 TOKEN Zero Trust (copie do painel): " TOKEN_CF
+
+# Detecta VMs (últimos CTs/VMs)
+VM_UBUNTU=$(pct list | grep ubuntu | tail -1 | awk '{print $1}' | xargs -I {} pct exec {} -- hostname || echo "192.168.1.10")
+VM_WINDOWS=$(qm list | grep win | tail -1 | awk '{print $1}' | xargs -I {} qm config {} | grep ipconfig | head -1 || echo "192.168.1.20")
+
+IP_VM_UBUNTU="${IP_BASE}.10"
+IP_VM_WINDOWS="${IP_BASE}.20"
+
+echo ""
+echo "🔍 Configuração detectada:"
+echo "   Túnel: $TUNNEL_NAME"
+echo "   CT IP: $IP_CT"
+echo "   Ubuntu SSH: ubuntu.$DOMINIO → $IP_VM_UBUNTU:22"
+echo "   Windows RDP: windows.$DOMINIO → $IP_VM_WINDOWS:3389"
+echo ""
+read -p "✅ Prosseguir? (s/N): " CONFIRM
+[[ $CONFIRM =~ ^[Ss] ]] || exit 0
+
+# Limpa CT se existir
+pct status $CTID >/dev/null 2>&1 && pct stop $CTID && pct destroy $CTID
+
+# Cria CT Ubuntu
+echo "🐳 Criando CT $CTID..."
 pct create $CTID local:vztmpl/ubuntu-24.04-standard_24.04-1_amd64.tar.zst \
-  --hostname cloudflare-ct --cores 1 --memory 512 --swap 512 --net0 name=eth0,bridge=vmbr0,ip=$IP_CT,gw=$GATEWAY \
+  --hostname cloudflare-rdp --cores 1 --memory 512 \
+  --net0 "name=eth0,bridge=vmbr0,ip=$IP_CT/24,gw=$GATEWAY" \
   --rootfs local-lvm:4 --unprivileged 1 --features nesting=1
-pct start $CTID
-pct exec $CTID -- bash -c "apt update && apt upgrade -y && apt install curl wget -y"
-pct exec $CTID -- bash -c "curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o /tmp/cloudflared.deb && dpkg -i /tmp/cloudflared.deb"
-pct exec $CTID -- bash -c "cloudflared service install $TOKEN_CF && systemctl restart cloudflared && systemctl enable cloudflared"
 
-echo "Configurando túneis via API (edite config.yml manualmente ou use API CF)"
-pct exec $CTID -- bash -c "cloudflared tunnel route dns proxmox-tunnel $SUB_UBUNTU.grythprogress.com.br"
-# Nota: Para túneis SSH/RDP, configure manual no painel CF após rodar script (Public Hostnames: TCP://$IP_VM_UBUNTU:22 e TCP://$IP_VM_WINDOWS:3389 com No TLS Verify)
+pct start $CTID && sleep 10
 
-echo "CT pronto! Acesse console CT $CTID e verifique: cloudflared tunnel list"
+# Instala Cloudflare Tunnel
+echo "☁️  Instalando cloudflared..."
+pct exec $CTID bash -c "
+apt update -y && apt upgrade -y
+curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb -o cloudflared.deb
+dpkg -i cloudflared.deb
+cloudflared service install '$TOKEN_CF'
+systemctl restart cloudflared && systemctl enable cloudflared
+cloudflared tunnel route dns $TUNNEL_NAME ubuntu.$DOMINIO
+cloudflared tunnel route dns $TUNNEL_NAME windows.$DOMINIO
+"
+
+echo "✅ RDP-SERVER PRONTO!"
+echo ""
+echo "🎮 Cloudflare Automático:"
+echo "1. Zero Trust > Tunnels > $TUNNEL_NAME > Configure"
+echo "2. Public Hostname → ADICIONE:"
+echo "   • ubuntu.$DOMINIO → $IP_VM_UBUNTU:22 (TCP + No TLS Verify)"
+echo "   • windows.$DOMINIO → $IP_VM_WINDOWS:3389 (TCP + No TLS Verify)"
+echo ""
+echo "🔍 Status: pct exec $CTID cloudflared tunnel list"
+echo "🎮 Teste: PuTTY ubuntu.$DOMINIO | RDP windows.$DOMINIO:3389"
