@@ -1,14 +1,14 @@
 #!/bin/bash
 # Script para Proxmox: Cria LXC Ubuntu + Cloudflare Tunnel para VMs
 CTID=999  # ID do novo CT (ajuste se ocupado)
-IP_CT="192.168.1.100/24"  # IP estático do CT (ajuste à sua rede)
-GATEWAY="192.168.1.1"     # Gateway da rede
+IP_CT="192.168.100.100/24"  # IP estático do CT (ajuste à sua rede)
+GATEWAY="192.168.100.1"     # Gateway da rede
 DNS="1.1.1.1"
 TOKEN_CF="SEU_TOKEN_AQUI"  # Cole o token do Zero Trust Tunnel aqui
 SUB_UBUNTU="ubuntu"        # ubuntu.grythprogress.com.br
-IP_VM_UBUNTU="192.168.1.10" # IP da VM Ubuntu
+IP_VM_UBUNTU="192.168.100.10" # IP da VM Ubuntu
 SUB_WINDOWS="windows"      # windows.grythprogress.com.br
-IP_VM_WINDOWS="192.168.1.20" # IP da VM Windows
+IP_VM_WINDOWS="192.168.100.20" # IP da VM Windows
 
 echo "Criando LXC Ubuntu $CTID..."
 pct create $CTID local:vztmpl/ubuntu-24.04-standard_24.04-1_amd64.tar.zst \
